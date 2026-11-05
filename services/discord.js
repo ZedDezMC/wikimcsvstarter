@@ -443,350 +443,62 @@ function initDiscordBot() {
   // 1. Xử lý Interaction (Buttons & Slash Commands)
   client.on('interactionCreate', async (interaction) => {
     try {
-    // --------------------------------------------------
-    // A. XỬ LÝ SLASH COMMANDS (`/`)
-    // --------------------------------------------------
-    if (interaction.isChatInputCommand()) {
-      const { commandName } = interaction;
+      // --------------------------------------------------
+      // A. XỬ LÝ SLASH COMMANDS (`/`)
+      // --------------------------------------------------
+      if (interaction.isChatInputCommand()) {
+        const { commandName } = interaction;
 
-      // 1. Kiểm tra kênh được phép cho User thường
-      if (!isChannelAllowed(interaction.channelId, interaction.member, interaction.user)) {
-        return interaction.reply({
-          content: '[DENIED] Chỉ được phép sử dụng lệnh này tại kênh <#1273063048520667217> hoặc <#1531664569590616205>.',
-          ephemeral: true
-        });
-      }
-
-      // 2. Công khai cho mọi người: /status, /startmc, /help. Các lệnh khác yêu cầu Admin.
-      const publicCommands = ['status', 'startmc', 'help'];
-      if (!publicCommands.includes(commandName) && !isAuthorized(interaction.member, interaction.user)) {
-        return interaction.reply({
-          content: '[DENIED] Hiện tại không có quyền để sử dụng lệnh này.',
-          ephemeral: true
-        });
-      }
-
-      const instanceId = process.env.EC2_INSTANCE_ID;
-
-      if (commandName === 'status') {
-        await interaction.deferReply();
-        const { embed } = await buildUserStatusEmbed();
-        return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
-      }
-
-      if (commandName === 'panel') {
-        await interaction.deferReply();
-        return await startAutoRefreshInteractionPanel(interaction, 5000, 300000);
-      }
-
-      if (commandName === 'startmc') {
-        await interaction.deferReply();
-        try {
-          const { state, publicIp } = await getInstanceStatus(instanceId);
-          if (state !== 'running') {
-            return editReplyWithAutoDelete(interaction, {
-              content: `[INFO] VPS hiện tại đang \`${state.toUpperCase()}\``
-            }, 60000);
-          }
-
-          const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
-          const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
-          if (mcOnline) {
-            const customAddress = (process.env.CUSTOM_SERVER_ADDRESS || '').trim();
-            const serverAddr = customAddress || (publicIp ? `${publicIp}:${mcPort}` : 'N/A');
-            return editReplyWithAutoDelete(interaction, {
-              content: `[INFO] Địa chỉ server: \`${serverAddr}\``
-            }, 60000);
-          }
-
-          const pufferServerId = process.env.PUFFER_SERVER_ID;
-          if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
-            const ssmPufferCmd = generatePufferPanelSSMCommand(
-              pufferServerId,
-              process.env.PUFFER_CLIENT_ID,
-              process.env.PUFFER_CLIENT_SECRET,
-              process.env.PUFFER_PORT || '8080'
-            );
-            await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
-          } else {
-            const mcCommand = process.env.MC_START_COMMAND || 'sudo systemctl start MC';
-            await runSSMStartMinecraftCommand(instanceId, mcCommand);
-          }
-
-          return editReplyWithAutoDelete(interaction, {
-            content: '[START MC] Đã gửi lệnh bật, chờ đi'
-          }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, {
-            content: `[ERROR] Không thể khởi động do: ${err.message}`
-          }, 60000);
-        }
-      }
-
-      if (commandName === 'start') {
-        await interaction.deferReply();
-        try {
-          const res = await startInstance(instanceId);
-          const embed = new EmbedBuilder()
-            .setColor(0x2ecc71)
-            .setTitle('[START] Dang khoi dong VPS...')
-            .setDescription(`Đã gửi lệnh bật VPS (${instanceId}).\nTrạng thái trước đó: \`${res.previousState}\` -> Trạng thái hiện tại: \`${res.currentState}\`.\nVui lòng chờ khoảng 30-60 giây để hoàn thành thao tác.`)
-            .setTimestamp();
-          return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể khởi động: ${err.message}` }, 60000);
-        }
-      }
-
-      if (commandName === 'stop') {
-        await interaction.deferReply();
-        try {
-          // Gửi lệnh save-all trước khi stop VPS
-          try {
-            await runSSMStartMinecraftCommand(instanceId, 'sudo systemctl stop MC || true');
-          } catch (e) { }
-
-          const res = await stopInstance(instanceId);
-          const embed = new EmbedBuilder()
-            .setColor(0xe74c3c)
-            .setTitle('[STOP] Dang tat VPS...')
-            .setDescription(`Đã gửi lệnh tắt VPS (${instanceId}).\nTrạng thái trước đó: \`${res.previousState}\` -> Trạng thái hiện tại: \`${res.currentState}\`.`)
-            .setTimestamp();
-          return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể tắt VPS: ${err.message}` }, 60000);
-        }
-      }
-
-      if (commandName === 'restart') {
-        await interaction.deferReply();
-        try {
-          const pufferServerId = process.env.PUFFER_SERVER_ID;
-          if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
-            const ssmPufferCmd = generatePufferPanelSSMCommand(
-              pufferServerId,
-              process.env.PUFFER_CLIENT_ID,
-              process.env.PUFFER_CLIENT_SECRET,
-              process.env.PUFFER_PORT || '8080'
-            );
-            await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
-          } else {
-            const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart MC';
-            await runSSMStartMinecraftCommand(instanceId, mcCmd);
-          }
-          return editReplyWithAutoDelete(interaction, { content: '[SUCCESS] Đã gửi lệnh Restart MC' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể restart MC Server do: ${err.message}` }, 60000);
-        }
-      }
-
-      if (commandName === 'rebootvps') {
-        await interaction.deferReply();
-        try {
-          await rebootInstance(instanceId);
-          return editReplyWithAutoDelete(interaction, { content: '[REBOOT] Đang Restart VPS' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể Restart VPS do: ${err.message}` }, 60000);
-        }
-      }
-
-      if (commandName === 'mode') {
-        await interaction.deferReply();
-        const modeType = interaction.options.getString('type');
-        if (modeType === 'dev') {
-          try {
-            await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
-            currentMode = 'dev';
-            return editReplyWithAutoDelete(interaction, { content: '[DEV MODE] Đã chuyển dev mode' }, 60000);
-          } catch (err) {
-            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi chuyển Dev Mode: ${err.message}` }, 60000);
-          }
-        } else {
-          try {
-            await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
-            currentMode = 'normal';
-            return editReplyWithAutoDelete(interaction, { content: '[NORMAL MODE] Đã chuyển sang NORMAL MODE' }, 60000);
-          } catch (err) {
-            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Normal Mode: ${err.message}` }, 60000);
-          }
-        }
-      }
-
-      if (commandName === 'cmd') {
-        await interaction.deferReply();
-        const mcCmd = interaction.options.getString('command');
-        try {
-          // 1. Kiểm tra trạng thái VPS & Server MC
-          const { state, publicIp } = await getInstanceStatus(instanceId);
-          if (state !== 'running') {
-            return editReplyWithAutoDelete(interaction, {
-              content: `[ERROR] VPS đang \`${state.toUpperCase()}\`, cần bật trước`
-            }, 60000);
-          }
-
-          const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
-          const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
-          if (!mcOnline) {
-            return editReplyWithAutoDelete(interaction, {
-              content: '[ERROR] Đang chờ khởi động hoặc server tắt'
-            }, 60000);
-          }
-
-          // 2. Gửi lệnh tới MC Console qua RCON
-          const result = await sendMinecraftRconCommand(instanceId, publicIp, mcCmd);
-
-          // 3. Format kết quả trả về Discord (Giới hạn tối đa 1800 ký tự)
-          let formattedOutput = result || '(Lệnh đã thực thi thành công, không có phản hồi)';
-          if (formattedOutput.length > 1800) {
-            formattedOutput = formattedOutput.substring(0, 1800) + '\n... (Nội dung đã được cắt bớt)';
-          }
-
-          return interaction.editReply({
-            content: `[MC CONSOLE] Lệnh: \`/${mcCmd.replace(/^\//, '')}\`\n\`\`\`text\n${formattedOutput}\n\`\`\``
+        // 1. Kiểm tra kênh được phép cho User thường
+        if (!isChannelAllowed(interaction.channelId, interaction.member, interaction.user)) {
+          return interaction.reply({
+            content: '[DENIED] Chỉ được phép sử dụng lệnh này tại kênh <#1273063048520667217> hoặc <#1531664569590616205>.',
+            ephemeral: true
           });
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, {
-            content: `[ERROR] Lỗi dùng lệnh: ${err.message}`
-          }, 60000);
-        }
-      }
-
-      if (commandName === 'help') {
-        const helpEmbed = new EmbedBuilder()
-          .setColor(0x3498db)
-          .setTitle('Tro giup')
-          .setDescription('Các câu lệnh Discord Bot:')
-          .addFields(
-            { name: 'Công khai:', value: '───────────────────────────', inline: false },
-            { name: '`/status` hoặc `!status`', value: 'Xem trạng thái VPS, Server MC và IP', inline: false },
-            { name: '`/startmc` hoặc `!startmc`', value: 'Khởi động Server MC nếu thấy VPS đang chạy', inline: false },
-            { name: '`/help` hoặc `!help`', value: 'Xem bảng này', inline: false },
-            { name: 'Quản trị:', value: '───────────────────────────', inline: false },
-            { name: '`/panel` hoặc `!panel`', value: 'Tìm link dashboard', inline: false },
-            { name: '`/start` hoặc `!start`', value: 'Bật cả VPS và MC Server.', inline: false },
-            { name: '`/stop` hoặc `!stop`', value: 'Tắt MC Server và VPS.', inline: false },
-            { name: '`/restart` hoặc `!restart`', value: 'Khởi động lại Server MC.', inline: false },
-            { name: '`/rebootvps` hoặc `!rebootvps`', value: 'Khởi động lại máy chủ VPS EC2.', inline: false },
-            { name: '`/mode` hoặc `!mode`', value: 'Đổi chế độ Dev Mode / Normal Mode.', inline: false },
-            { name: '`/cmd <lệnh>` hoặc `!cmd <lệnh>`', value: 'Gửi lệnh đến Server MC', inline: false }
-          );
-        return interaction.reply({ embeds: [helpEmbed] });
-      }
-    }
-
-    // --------------------------------------------------
-    // B. XỬ LÝ ACTION BUTTONS (Nút Bấm Trực Quan)
-    // --------------------------------------------------
-    if (interaction.isButton()) {
-      if (!isAuthorized(interaction.member, interaction.user)) {
-        return interaction.reply({
-          content: '[DENIED] Hiện tại không có quyền sử dụng chức năng',
-          ephemeral: true
-        });
-      }
-
-      const customId = interaction.customId;
-      const instanceId = process.env.EC2_INSTANCE_ID;
-
-      // 1. Refresh Status
-      if (customId === 'refresh_status') {
-        await interaction.deferUpdate();
-        const { embed, ec2State } = await buildStatusEmbed();
-        return interaction.editReply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
-      }
-
-      // 2. Start VPS & MC
-      if (customId === 'start_server') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          const res = await startInstance(instanceId);
-          return editReplyWithAutoDelete(interaction, { content: `[START] Đã gửi lệnh bật: \`${res.currentState}\`. Cần chờ` }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi bật VPS: ${err.message}` }, 60000);
-        }
-      }
-
-      // 3. Stop VPS & MC
-      if (customId === 'stop_server') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          await stopInstance(instanceId);
-          return editReplyWithAutoDelete(interaction, { content: '[STOP] Đã gửi lệnh tắt' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi tắt VPS: ${err.message}` }, 60000);
-        }
-      }
-
-      // 4. Restart MC
-      if (customId === 'restart_server') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart MC';
-          await runSSMStartMinecraftCommand(instanceId, mcCmd);
-          return editReplyWithAutoDelete(interaction, { content: '[RESTART] Đã gửi lệnh Restart MC Server' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi Restart: ${err.message}` }, 60000);
-        }
-      }
-
-      // 4.5. Restart VPS
-      if (customId === 'reboot_vps') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          await rebootInstance(instanceId);
-          return editReplyWithAutoDelete(interaction, { content: '[REBOOT] Đã gửi lệnh Restart VPS thành công! Cần chờ 1-2 phút để VPS khởi động lại.' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi Restart VPS: ${err.message}` }, 60000);
-        }
-      }
-
-      // 5. Dev Mode
-      if (customId === 'set_dev_mode') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
-          currentMode = 'dev';
-          return editReplyWithAutoDelete(interaction, { content: '[DEV MODE] Đã kích hoạt DEV MODE thành công' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Dev Mode: ${err.message}` }, 60000);
-        }
-      }
-
-      // 6. Normal Mode
-      if (customId === 'set_normal_mode') {
-        await interaction.deferReply({ ephemeral: true });
-        try {
-          await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
-          currentMode = 'normal';
-          return editReplyWithAutoDelete(interaction, { content: '[NORMAL MODE] Đã kích hoạt NORMAL MODE thành công' }, 60000);
-        } catch (err) {
-          return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Normal Mode: ${err.message}` }, 60000);
-        }
-      }
-
-      // 7. Request Approve/Reject Handle
-      if (customId.startsWith('approve_mc_') || customId.startsWith('reject_mc_')) {
-        const isApprove = customId.startsWith('approve_mc_');
-        const reqId = customId.replace('approve_mc_', '').replace('reject_mc_', '');
-        const requestData = pendingRequests.get(reqId);
-
-        if (!requestData) {
-          return interaction.reply({ content: '[WARN] Yêu cầu này đã hết hạn.', ephemeral: true });
         }
 
-        clearTimeout(requestData.timer);
-        pendingRequests.delete(reqId);
-        const adminUser = interaction.user.tag;
+        // 2. Công khai cho mọi người: /status, /startmc, /help. Các lệnh khác yêu cầu Admin.
+        const publicCommands = ['status', 'startmc', 'help'];
+        if (!publicCommands.includes(commandName) && !isAuthorized(interaction.member, interaction.user)) {
+          return interaction.reply({
+            content: '[DENIED] Hiện tại không có quyền để sử dụng lệnh này.',
+            ephemeral: true
+          });
+        }
 
-        if (isApprove) {
-          await interaction.deferUpdate().catch(() => {});
-          const approvedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-            .setColor(0x2ecc71)
-            .setTitle('[APPROVED]')
-            .setDescription(`Đã phê duyệt yêu cầu`);
-          await interaction.editReply({ embeds: [approvedEmbed], components: [] }).catch(() => {});
+        const instanceId = process.env.EC2_INSTANCE_ID;
 
+        if (commandName === 'status') {
+          await interaction.deferReply();
+          const { embed } = await buildUserStatusEmbed();
+          return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
+        }
+
+        if (commandName === 'panel') {
+          await interaction.deferReply();
+          return await startAutoRefreshInteractionPanel(interaction, 5000, 300000);
+        }
+
+        if (commandName === 'startmc') {
+          await interaction.deferReply();
           try {
+            const { state, publicIp } = await getInstanceStatus(instanceId);
+            if (state !== 'running') {
+              return editReplyWithAutoDelete(interaction, {
+                content: `[INFO] VPS hiện tại đang \`${state.toUpperCase()}\``
+              }, 60000);
+            }
+
+            const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
+            const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
+            if (mcOnline) {
+              const customAddress = (process.env.CUSTOM_SERVER_ADDRESS || '').trim();
+              const serverAddr = customAddress || (publicIp ? `${publicIp}:${mcPort}` : 'N/A');
+              return editReplyWithAutoDelete(interaction, {
+                content: `[INFO] Địa chỉ server: \`${serverAddr}\``
+              }, 60000);
+            }
+
             const pufferServerId = process.env.PUFFER_SERVER_ID;
             if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
               const ssmPufferCmd = generatePufferPanelSSMCommand(
@@ -800,218 +512,506 @@ function initDiscordBot() {
               const mcCommand = process.env.MC_START_COMMAND || 'sudo systemctl start MC';
               await runSSMStartMinecraftCommand(instanceId, mcCommand);
             }
-            requestData.resolve({ status: 'approved', admin: adminUser });
+
+            return editReplyWithAutoDelete(interaction, {
+              content: '[START MC] Đã gửi lệnh bật, chờ đi'
+            }, 60000);
           } catch (err) {
-            requestData.reject(err);
+            return editReplyWithAutoDelete(interaction, {
+              content: `[ERROR] Không thể khởi động do: ${err.message}`
+            }, 60000);
           }
-        } else {
-          await interaction.deferUpdate().catch(() => {});
-          const rejectedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-            .setColor(0xe74c3c)
-            .setTitle('[REJECTED]')
-            .setDescription(`Đã từ chối yêu cầu.`);
-          await interaction.editReply({ embeds: [rejectedEmbed], components: [] }).catch(() => {});
-          requestData.resolve({ status: 'rejected', admin: adminUser });
+        }
+
+        if (commandName === 'start') {
+          await interaction.deferReply();
+          try {
+            const res = await startInstance(instanceId);
+            const embed = new EmbedBuilder()
+              .setColor(0x2ecc71)
+              .setTitle('[START] Dang khoi dong VPS...')
+              .setDescription(`Đã gửi lệnh bật VPS (${instanceId}).\nTrạng thái trước đó: \`${res.previousState}\` -> Trạng thái hiện tại: \`${res.currentState}\`.\nVui lòng chờ khoảng 30-60 giây để hoàn thành thao tác.`)
+              .setTimestamp();
+            return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể khởi động: ${err.message}` }, 60000);
+          }
+        }
+
+        if (commandName === 'stop') {
+          await interaction.deferReply();
+          try {
+            // Gửi lệnh save-all trước khi stop VPS
+            try {
+              await runSSMStartMinecraftCommand(instanceId, 'sudo systemctl stop MC || true');
+            } catch (e) { }
+
+            const res = await stopInstance(instanceId);
+            const embed = new EmbedBuilder()
+              .setColor(0xe74c3c)
+              .setTitle('[STOP] Dang tat VPS...')
+              .setDescription(`Đã gửi lệnh tắt VPS (${instanceId}).\nTrạng thái trước đó: \`${res.previousState}\` -> Trạng thái hiện tại: \`${res.currentState}\`.`)
+              .setTimestamp();
+            return editReplyWithAutoDelete(interaction, { embeds: [embed] }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể tắt VPS: ${err.message}` }, 60000);
+          }
+        }
+
+        if (commandName === 'restart') {
+          await interaction.deferReply();
+          try {
+            const pufferServerId = process.env.PUFFER_SERVER_ID;
+            if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
+              const ssmPufferCmd = generatePufferPanelSSMCommand(
+                pufferServerId,
+                process.env.PUFFER_CLIENT_ID,
+                process.env.PUFFER_CLIENT_SECRET,
+                process.env.PUFFER_PORT || '8080'
+              );
+              await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
+            } else {
+              const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart minecraft';
+              await runSSMStartMinecraftCommand(instanceId, mcCmd);
+            }
+            return editReplyWithAutoDelete(interaction, { content: '[SUCCESS] Đã gửi lệnh Restart MC' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể restart MC Server do: ${err.message}` }, 60000);
+          }
+        }
+
+        if (commandName === 'rebootvps') {
+          await interaction.deferReply();
+          try {
+            await rebootInstance(instanceId);
+            return editReplyWithAutoDelete(interaction, { content: '[REBOOT] Đang Restart VPS' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Không thể Restart VPS do: ${err.message}` }, 60000);
+          }
+        }
+
+        if (commandName === 'mode') {
+          await interaction.deferReply();
+          const modeType = interaction.options.getString('type');
+          if (modeType === 'dev') {
+            try {
+              await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
+              currentMode = 'dev';
+              return editReplyWithAutoDelete(interaction, { content: '[DEV MODE] Đã chuyển dev mode' }, 60000);
+            } catch (err) {
+              return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi chuyển Dev Mode: ${err.message}` }, 60000);
+            }
+          } else {
+            try {
+              await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
+              currentMode = 'normal';
+              return editReplyWithAutoDelete(interaction, { content: '[NORMAL MODE] Đã chuyển sang NORMAL MODE' }, 60000);
+            } catch (err) {
+              return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Normal Mode: ${err.message}` }, 60000);
+            }
+          }
+        }
+
+        if (commandName === 'cmd') {
+          await interaction.deferReply();
+          const mcCmd = interaction.options.getString('command');
+          try {
+            // 1. Kiểm tra trạng thái VPS & Server MC
+            const { state, publicIp } = await getInstanceStatus(instanceId);
+            if (state !== 'running') {
+              return editReplyWithAutoDelete(interaction, {
+                content: `[ERROR] VPS đang \`${state.toUpperCase()}\`, cần bật trước`
+              }, 60000);
+            }
+
+            const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
+            const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
+            if (!mcOnline) {
+              return editReplyWithAutoDelete(interaction, {
+                content: '[ERROR] Đang chờ khởi động hoặc server tắt'
+              }, 60000);
+            }
+
+            // 2. Gửi lệnh tới MC Console qua RCON
+            const result = await sendMinecraftRconCommand(instanceId, publicIp, mcCmd);
+
+            // 3. Format kết quả trả về Discord (Giới hạn tối đa 1800 ký tự)
+            let formattedOutput = result || '(Lệnh đã thực thi thành công, không có phản hồi)';
+            if (formattedOutput.length > 1800) {
+              formattedOutput = formattedOutput.substring(0, 1800) + '\n... (Nội dung đã được cắt bớt)';
+            }
+
+            return interaction.editReply({
+              content: `[MC CONSOLE] Lệnh: \`/${mcCmd.replace(/^\//, '')}\`\n\`\`\`text\n${formattedOutput}\n\`\`\``
+            });
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, {
+              content: `[ERROR] Lỗi dùng lệnh: ${err.message}`
+            }, 60000);
+          }
+        }
+
+        if (commandName === 'help') {
+          const helpEmbed = new EmbedBuilder()
+            .setColor(0x3498db)
+            .setTitle('Tro giup')
+            .setDescription('Các câu lệnh Discord Bot:')
+            .addFields(
+              { name: 'Công khai:', value: '───────────────────────────', inline: false },
+              { name: '`/status` hoặc `!status`', value: 'Xem trạng thái VPS, Server MC và IP', inline: false },
+              { name: '`/startmc` hoặc `!startmc`', value: 'Khởi động Server MC nếu thấy VPS đang chạy', inline: false },
+              { name: '`/help` hoặc `!help`', value: 'Xem bảng này', inline: false },
+              { name: 'Quản trị:', value: '───────────────────────────', inline: false },
+              { name: '`/panel` hoặc `!panel`', value: 'Tìm link dashboard', inline: false },
+              { name: '`/start` hoặc `!start`', value: 'Bật cả VPS và MC Server.', inline: false },
+              { name: '`/stop` hoặc `!stop`', value: 'Tắt MC Server và VPS.', inline: false },
+              { name: '`/restart` hoặc `!restart`', value: 'Khởi động lại Server MC.', inline: false },
+              { name: '`/rebootvps` hoặc `!rebootvps`', value: 'Khởi động lại máy chủ VPS EC2.', inline: false },
+              { name: '`/mode` hoặc `!mode`', value: 'Đổi chế độ Dev Mode / Normal Mode.', inline: false },
+              { name: '`/cmd <lệnh>` hoặc `!cmd <lệnh>`', value: 'Gửi lệnh đến Server MC', inline: false }
+            );
+          return interaction.reply({ embeds: [helpEmbed] });
         }
       }
+
+      // --------------------------------------------------
+      // B. XỬ LÝ ACTION BUTTONS (Nút Bấm Trực Quan)
+      // --------------------------------------------------
+      if (interaction.isButton()) {
+        if (!isAuthorized(interaction.member, interaction.user)) {
+          return interaction.reply({
+            content: '[DENIED] Hiện tại không có quyền sử dụng chức năng',
+            ephemeral: true
+          });
+        }
+
+        const customId = interaction.customId;
+        const instanceId = process.env.EC2_INSTANCE_ID;
+
+        // 1. Refresh Status
+        if (customId === 'refresh_status') {
+          await interaction.deferUpdate();
+          const { embed, ec2State } = await buildStatusEmbed();
+          return interaction.editReply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
+        }
+
+        // 2. Start VPS & MC
+        if (customId === 'start_server') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            const res = await startInstance(instanceId);
+            return editReplyWithAutoDelete(interaction, { content: `[START] Đã gửi lệnh bật: \`${res.currentState}\`. Cần chờ` }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi bật VPS: ${err.message}` }, 60000);
+          }
+        }
+
+        // 3. Stop VPS & MC
+        if (customId === 'stop_server') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            await stopInstance(instanceId);
+            return editReplyWithAutoDelete(interaction, { content: '[STOP] Đã gửi lệnh tắt' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi tắt VPS: ${err.message}` }, 60000);
+          }
+        }
+
+        // 4. Restart MC
+        if (customId === 'restart_server') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart minecraft';
+            await runSSMStartMinecraftCommand(instanceId, mcCmd);
+            return editReplyWithAutoDelete(interaction, { content: '[RESTART] Đã gửi lệnh Restart MC Server' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi Restart: ${err.message}` }, 60000);
+          }
+        }
+
+        // 4.5. Restart VPS
+        if (customId === 'reboot_vps') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            await rebootInstance(instanceId);
+            return editReplyWithAutoDelete(interaction, { content: '[REBOOT] Đã gửi lệnh Restart VPS thành công! Cần chờ 1-2 phút để VPS khởi động lại.' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi Restart VPS: ${err.message}` }, 60000);
+          }
+        }
+
+        // 5. Dev Mode
+        if (customId === 'set_dev_mode') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
+            currentMode = 'dev';
+            return editReplyWithAutoDelete(interaction, { content: '[DEV MODE] Đã kích hoạt DEV MODE thành công' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Dev Mode: ${err.message}` }, 60000);
+          }
+        }
+
+        // 6. Normal Mode
+        if (customId === 'set_normal_mode') {
+          await interaction.deferReply({ ephemeral: true });
+          try {
+            await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
+            currentMode = 'normal';
+            return editReplyWithAutoDelete(interaction, { content: '[NORMAL MODE] Đã kích hoạt NORMAL MODE thành công' }, 60000);
+          } catch (err) {
+            return editReplyWithAutoDelete(interaction, { content: `[ERROR] Lỗi khi bật Normal Mode: ${err.message}` }, 60000);
+          }
+        }
+
+        // 7. Request Approve/Reject Handle
+        if (customId.startsWith('approve_mc_') || customId.startsWith('reject_mc_')) {
+          const isApprove = customId.startsWith('approve_mc_');
+          const reqId = customId.replace('approve_mc_', '').replace('reject_mc_', '');
+          const requestData = pendingRequests.get(reqId);
+
+          if (!requestData) {
+            return interaction.reply({ content: '[WARN] Yêu cầu này đã hết hạn.', ephemeral: true });
+          }
+
+          clearTimeout(requestData.timer);
+          pendingRequests.delete(reqId);
+          const adminUser = interaction.user.tag;
+
+          if (isApprove) {
+            await interaction.deferUpdate().catch(() => { });
+            const approvedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+              .setColor(0x2ecc71)
+              .setTitle('[APPROVED]')
+              .setDescription(`Đã phê duyệt yêu cầu`);
+            await interaction.editReply({ embeds: [approvedEmbed], components: [] }).catch(() => { });
+
+            try {
+              const pufferServerId = process.env.PUFFER_SERVER_ID;
+              if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
+                const ssmPufferCmd = generatePufferPanelSSMCommand(
+                  pufferServerId,
+                  process.env.PUFFER_CLIENT_ID,
+                  process.env.PUFFER_CLIENT_SECRET,
+                  process.env.PUFFER_PORT || '8080'
+                );
+                await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
+              } else {
+                const mcCommand = process.env.MC_START_COMMAND || 'sudo systemctl start minecraft';
+                await runSSMStartMinecraftCommand(instanceId, mcCommand);
+              }
+              requestData.resolve({ status: 'approved', admin: adminUser });
+            } catch (err) {
+              requestData.reject(err);
+            }
+          } else {
+            await interaction.deferUpdate().catch(() => { });
+            const rejectedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
+              .setColor(0xe74c3c)
+              .setTitle('[REJECTED]')
+              .setDescription(`Đã từ chối yêu cầu.`);
+            await interaction.editReply({ embeds: [rejectedEmbed], components: [] }).catch(() => { });
+            requestData.resolve({ status: 'rejected', admin: adminUser });
+          }
+        }
+      }
+    } catch (err) {
+      if (err.code === 10062 || err.code === 40060) return;
+      console.error('[Discord] Interaction error');
     }
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) return;
-    console.error('[Discord] Interaction error');
-  }
-});
+  });
 
   // 2. Lắng nghe tin nhắn văn bản Prefix (`!`) từ Admin & User
   client.on('messageCreate', async (message) => {
     try {
       if (message.author.bot) return;
 
-    const content = message.content.trim();
-    const lowerContent = content.toLowerCase();
-    const instanceId = process.env.EC2_INSTANCE_ID;
+      const content = message.content.trim();
+      const lowerContent = content.toLowerCase();
+      const instanceId = process.env.EC2_INSTANCE_ID;
 
-    // 1. Kiểm tra kênh được phép cho User thường
-    if (!isChannelAllowed(message.channel.id, message.member, message.author)) {
-      return;
-    }
+      // 1. Kiểm tra kênh được phép cho User thường
+      if (!isChannelAllowed(message.channel.id, message.member, message.author)) {
+        return;
+      }
 
-    // 2. Danh sách lệnh công khai cho tất cả mọi người (!status, !startmc, !help)
-    const publicPrefixes = ['!status', '!startmc', '!mcstart', '!start-mc', '!help', '!h'];
-    const isPublicCmd = publicPrefixes.includes(lowerContent);
+      // 2. Danh sách lệnh công khai cho tất cả mọi người (!status, !startmc, !help)
+      const publicPrefixes = ['!status', '!startmc', '!mcstart', '!start-mc', '!help', '!h'];
+      const isPublicCmd = publicPrefixes.includes(lowerContent);
 
-    if (!isPublicCmd && !isAuthorized(message.member, message.author)) {
-      return;
-    }
+      if (!isPublicCmd && !isAuthorized(message.member, message.author)) {
+        return;
+      }
 
-    // Status (Công khai cho mọi người - Embed đơn giản)
-    if (lowerContent === '!status') {
-      const { embed } = await buildUserStatusEmbed();
-      return sendAutoDeleteReply(message, { embeds: [embed] }, 60000);
-    }
+      // Status (Công khai cho mọi người - Embed đơn giản)
+      if (lowerContent === '!status') {
+        const { embed } = await buildUserStatusEmbed();
+        return sendAutoDeleteReply(message, { embeds: [embed] }, 60000);
+      }
 
-    // Panel / Admin (Dành riêng cho Admin)
-    if (['!panel', '!admin'].includes(lowerContent)) {
-      return startAutoRefreshMessagePanel(message, 5000, 300000);
-    }
+      // Panel / Admin (Dành riêng cho Admin)
+      if (['!panel', '!admin'].includes(lowerContent)) {
+        return startAutoRefreshMessagePanel(message, 5000, 300000);
+      }
 
-    // Start MC (Công khai cho mọi người khi VPS đang chạy)
-    if (['!startmc', '!mcstart', '!start-mc'].includes(lowerContent)) {
-      try {
-        const { state, publicIp } = await getInstanceStatus(instanceId);
-        if (state !== 'running') {
-          return sendAutoDeleteReply(message, `[INFO] VPS hiện đang \`${state.toUpperCase()}\``, 60000);
+      // Start MC (Công khai cho mọi người khi VPS đang chạy)
+      if (['!startmc', '!mcstart', '!start-mc'].includes(lowerContent)) {
+        try {
+          const { state, publicIp } = await getInstanceStatus(instanceId);
+          if (state !== 'running') {
+            return sendAutoDeleteReply(message, `[INFO] VPS hiện đang \`${state.toUpperCase()}\``, 60000);
+          }
+
+          const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
+          const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
+          if (mcOnline) {
+            const customAddress = (process.env.CUSTOM_SERVER_ADDRESS || '').trim();
+            const serverAddr = customAddress || (publicIp ? `${publicIp}:${mcPort}` : 'N/A');
+            return sendAutoDeleteReply(message, `[INFO] Server MC hiện tại đã ONLINE rồi!\nĐịa chỉ máy chủ: \`${serverAddr}\``, 60000);
+          }
+
+          const pufferServerId = process.env.PUFFER_SERVER_ID;
+          if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
+            const ssmPufferCmd = generatePufferPanelSSMCommand(
+              pufferServerId,
+              process.env.PUFFER_CLIENT_ID,
+              process.env.PUFFER_CLIENT_SECRET,
+              process.env.PUFFER_PORT || '8080'
+            );
+            await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
+          } else {
+            const mcCommand = process.env.MC_START_COMMAND || 'sudo systemctl start minecraft';
+            await runSSMStartMinecraftCommand(instanceId, mcCommand);
+          }
+
+          return sendAutoDeleteReply(message, '[START MC] Đã gửi lệnh bật Server MC! Cần chờ khoảng 30-60 giây để server khởi động hoàn tất.', 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Không thể khởi động Server MC: ${err.message}`, 60000);
         }
+      }
 
-        const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
-        const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
-        if (mcOnline) {
-          const customAddress = (process.env.CUSTOM_SERVER_ADDRESS || '').trim();
-          const serverAddr = customAddress || (publicIp ? `${publicIp}:${mcPort}` : 'N/A');
-          return sendAutoDeleteReply(message, `[INFO] Server MC hiện tại đã ONLINE rồi!\nĐịa chỉ máy chủ: \`${serverAddr}\``, 60000);
-        }
-
-        const pufferServerId = process.env.PUFFER_SERVER_ID;
-        if (pufferServerId && process.env.PUFFER_CLIENT_ID) {
-          const ssmPufferCmd = generatePufferPanelSSMCommand(
-            pufferServerId,
-            process.env.PUFFER_CLIENT_ID,
-            process.env.PUFFER_CLIENT_SECRET,
-            process.env.PUFFER_PORT || '8080'
+      // Help
+      if (['!help', '!h'].includes(lowerContent)) {
+        const helpEmbed = new EmbedBuilder()
+          .setColor(0x3498db)
+          .setTitle('Tro giup')
+          .setDescription('Các câu lệnh Discord Bot:')
+          .addFields(
+            { name: 'Công khai:', value: '───────────────────────────', inline: false },
+            { name: '`!status`', value: 'Xem trạng thái VPS, Server MC và Địa chỉ máy chủ.', inline: false },
+            { name: '`!startmc`', value: 'Khởi động Server MC (khi VPS đã chạy).', inline: false },
+            { name: '`!help`', value: 'Xem menu trợ giúp.', inline: false },
+            { name: 'Quản trị:', value: '───────────────────────────', inline: false },
+            { name: '`!panel`', value: 'Mở Dashboard điều khiển', inline: false },
+            { name: '`!start`', value: 'Bật cả VPS và MC Server', inline: false },
+            { name: '`!stop`', value: 'Tắt MC Server và VPS', inline: false },
+            { name: '`!restart`', value: 'Khởi động lại MC Server', inline: false },
+            { name: '`!rebootvps`', value: 'Khởi động lại VPS', inline: false },
+            { name: '`!dev on` / `!mode dev`', value: 'Bật Dev Mode', inline: false },
+            { name: '`!dev off` / `!mode normal`', value: 'Bật Normal Mode', inline: false },
+            { name: '`!cmd <lệnh>`', value: 'Gửi lệnh trực tiếp đến Server MC', inline: false }
           );
-          await runSSMStartMinecraftCommand(instanceId, ssmPufferCmd);
-        } else {
-          const mcCommand = process.env.MC_START_COMMAND || 'sudo systemctl start MC';
-          await runSSMStartMinecraftCommand(instanceId, mcCommand);
+        return message.reply({ embeds: [helpEmbed] });
+      }
+
+      // Start
+      if (lowerContent === '!start') {
+        try {
+          const res = await startInstance(instanceId);
+          return sendAutoDeleteReply(message, `[START] Đã gửi lệnh bật VPS (${instanceId})! Status: \`${res.currentState}\`.`, 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Không thể bật VPS: ${err.message}`, 60000);
+        }
+      }
+
+      // Stop
+      if (lowerContent === '!stop') {
+        try {
+          await stopInstance(instanceId);
+          return sendAutoDeleteReply(message, `[STOP] Đã gửi lệnh tắt VPS (${instanceId})!`, 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Không thể tắt VPS: ${err.message}`, 60000);
+        }
+      }
+
+      // Restart MC
+      if (lowerContent === '!restart') {
+        try {
+          const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart minecraft';
+          await runSSMStartMinecraftCommand(instanceId, mcCmd);
+          return sendAutoDeleteReply(message, '[RESTART] Đã gửi lệnh', 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Không thể Restart: ${err.message}`, 60000);
+        }
+      }
+
+      // Restart VPS
+      if (['!rebootvps', '!restartvps', '!vpsrestart'].includes(lowerContent)) {
+        try {
+          await rebootInstance(instanceId);
+          return sendAutoDeleteReply(message, '[REBOOT] Đã gửi lệnh Restart VPS thành công! Cần chờ 1-2 phút để VPS khởi động lại.', 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Không thể Restart VPS: ${err.message}`, 60000);
+        }
+      }
+
+      // Dev Mode
+      if (['!mode dev', '!dev on', '!mode devmode'].includes(lowerContent)) {
+        try {
+          await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
+          currentMode = 'dev';
+          return sendAutoDeleteReply(message, '[DEV MODE] Đã chuyển sang DEV MODE', 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Lỗi khi bật Dev Mode: ${err.message}`, 60000);
+        }
+      }
+
+      // Normal Mode
+      if (['!mode normal', '!dev off', '!mode normalmode'].includes(lowerContent)) {
+        try {
+          await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
+          currentMode = 'normal';
+          return sendAutoDeleteReply(message, '[NORMAL MODE] Đã chuyển sang NORMAL MODE', 60000);
+        } catch (err) {
+          return sendAutoDeleteReply(message, `[ERROR] Lỗi khi bật Normal Mode: ${err.message}`, 60000);
+        }
+      }
+
+      // Direct MC RCON Command: !cmd <command>
+      if (lowerContent.startsWith('!cmd ')) {
+        const mcCmd = content.substring(5).trim();
+        if (!mcCmd) {
+          return sendAutoDeleteReply(message, '[WARN] Cần nhập lệnh. Ví dụ: `!cmd list` hoặc `!cmd say Hello`', 60000);
         }
 
-        return sendAutoDeleteReply(message, '[START MC] Đã gửi lệnh bật Server MC! Cần chờ khoảng 30-60 giây để server khởi động hoàn tất.', 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Không thể khởi động Server MC: ${err.message}`, 60000);
-      }
-    }
+        try {
+          const { state, publicIp } = await getInstanceStatus(instanceId);
+          if (state !== 'running') {
+            return sendAutoDeleteReply(message, `[ERROR] VPS hiện đang \`${state.toUpperCase()}\`. Cần bật VPS trước khi gửi lệnh`, 60000);
+          }
 
-    // Help
-    if (['!help', '!h'].includes(lowerContent)) {
-      const helpEmbed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle('Tro giup')
-        .setDescription('Các câu lệnh Discord Bot:')
-        .addFields(
-          { name: 'Công khai:', value: '───────────────────────────', inline: false },
-          { name: '`!status`', value: 'Xem trạng thái VPS, Server MC và Địa chỉ máy chủ.', inline: false },
-          { name: '`!startmc`', value: 'Khởi động Server MC (khi VPS đã chạy).', inline: false },
-          { name: '`!help`', value: 'Xem menu trợ giúp.', inline: false },
-          { name: 'Quản trị:', value: '───────────────────────────', inline: false },
-          { name: '`!panel`', value: 'Mở Dashboard điều khiển', inline: false },
-          { name: '`!start`', value: 'Bật cả VPS và MC Server', inline: false },
-          { name: '`!stop`', value: 'Tắt MC Server và VPS', inline: false },
-          { name: '`!restart`', value: 'Khởi động lại MC Server', inline: false },
-          { name: '`!rebootvps`', value: 'Khởi động lại VPS', inline: false },
-          { name: '`!dev on` / `!mode dev`', value: 'Bật Dev Mode', inline: false },
-          { name: '`!dev off` / `!mode normal`', value: 'Bật Normal Mode', inline: false },
-          { name: '`!cmd <lệnh>`', value: 'Gửi lệnh trực tiếp đến Server MC', inline: false }
-        );
-      return message.reply({ embeds: [helpEmbed] });
-    }
+          const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
+          const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
+          if (!mcOnline) {
+            return sendAutoDeleteReply(message, '[ERROR] Server MC hiện đang OFFLINE hoặc đang khởi động', 60000);
+          }
 
-    // Start
-    if (lowerContent === '!start') {
-      try {
-        const res = await startInstance(instanceId);
-        return sendAutoDeleteReply(message, `[START] Đã gửi lệnh bật VPS (${instanceId})! Status: \`${res.currentState}\`.`, 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Không thể bật VPS: ${err.message}`, 60000);
-      }
-    }
+          const result = await sendMinecraftRconCommand(instanceId, publicIp, mcCmd);
 
-    // Stop
-    if (lowerContent === '!stop') {
-      try {
-        await stopInstance(instanceId);
-        return sendAutoDeleteReply(message, `[STOP] Đã gửi lệnh tắt VPS (${instanceId})!`, 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Không thể tắt VPS: ${err.message}`, 60000);
-      }
-    }
+          let formattedOutput = result || '(Lệnh đã thực thi thành công, không có phản hồi)';
+          if (formattedOutput.length > 1800) {
+            formattedOutput = formattedOutput.substring(0, 1800) + '\n... (Nội dung đã được cắt bớt)';
+          }
 
-    // Restart MC
-    if (lowerContent === '!restart') {
-      try {
-        const mcCmd = process.env.MC_START_COMMAND || 'sudo systemctl restart MC';
-        await runSSMStartMinecraftCommand(instanceId, mcCmd);
-        return sendAutoDeleteReply(message, '[RESTART] Đã gửi lệnh Restart MC Server!', 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Không thể Restart: ${err.message}`, 60000);
-      }
-    }
-
-    // Restart VPS
-    if (['!rebootvps', '!restartvps', '!vpsrestart'].includes(lowerContent)) {
-      try {
-        await rebootInstance(instanceId);
-        return sendAutoDeleteReply(message, '[REBOOT] Đã gửi lệnh Restart VPS thành công! Cần chờ 1-2 phút để VPS khởi động lại.', 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Không thể Restart VPS: ${err.message}`, 60000);
-      }
-    }
-
-    // Dev Mode
-    if (['!mode dev', '!dev on', '!mode devmode'].includes(lowerContent)) {
-      try {
-        await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py dev || sudo touch /opt/mc-autoshutdown/DEV_MODE');
-        currentMode = 'dev';
-        return sendAutoDeleteReply(message, '[DEV MODE] Đã chuyển sang DEV MODE', 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Lỗi khi bật Dev Mode: ${err.message}`, 60000);
-      }
-    }
-
-    // Normal Mode
-    if (['!mode normal', '!dev off', '!mode normalmode'].includes(lowerContent)) {
-      try {
-        await runSSMStartMinecraftCommand(instanceId, 'python3 /opt/mc-autoshutdown/auto_shutdown.py normal || sudo rm -f /opt/mc-autoshutdown/DEV_MODE');
-        currentMode = 'normal';
-        return sendAutoDeleteReply(message, '[NORMAL MODE] Đã chuyển sang NORMAL MODE', 60000);
-      } catch (err) {
-        return sendAutoDeleteReply(message, `[ERROR] Lỗi khi bật Normal Mode: ${err.message}`, 60000);
-      }
-    }
-
-    // Direct MC RCON Command: !cmd <command>
-    if (lowerContent.startsWith('!cmd ')) {
-      const mcCmd = content.substring(5).trim();
-      if (!mcCmd) {
-        return sendAutoDeleteReply(message, '[WARN] Cần nhập lệnh. Ví dụ: `!cmd list` hoặc `!cmd say Hello`', 60000);
-      }
-
-      try {
-        const { state, publicIp } = await getInstanceStatus(instanceId);
-        if (state !== 'running') {
-          return sendAutoDeleteReply(message, `[ERROR] VPS hiện đang \`${state.toUpperCase()}\`. Cần bật VPS trước khi gửi lệnh`, 60000);
+          return message.reply(`[MC CONSOLE] Lệnh: \`/${mcCmd.replace(/^\//, '')}\`\n\`\`\`text\n${formattedOutput}\n\`\`\``);
+        } catch (err) {
+          return message.reply(`[ERROR] Lỗi khi thực thi lệnh MC: ${err.message}`);
         }
-
-        const mcPort = parseInt(process.env.MC_PORT || '25565', 10);
-        const mcOnline = publicIp ? await checkMinecraftServerStatus(publicIp, mcPort) : false;
-        if (!mcOnline) {
-          return sendAutoDeleteReply(message, '[ERROR] Server MC hiện đang OFFLINE hoặc đang khởi động', 60000);
-        }
-
-        const result = await sendMinecraftRconCommand(instanceId, publicIp, mcCmd);
-
-        let formattedOutput = result || '(Lệnh đã thực thi thành công, không có phản hồi)';
-        if (formattedOutput.length > 1800) {
-          formattedOutput = formattedOutput.substring(0, 1800) + '\n... (Nội dung đã được cắt bớt)';
-        }
-
-        return message.reply(`[MC CONSOLE] Lệnh: \`/${mcCmd.replace(/^\//, '')}\`\n\`\`\`text\n${formattedOutput}\n\`\`\``);
-      } catch (err) {
-        return message.reply(`[ERROR] Lỗi khi thực thi lệnh MC: ${err.message}`);
       }
+    } catch {
+      console.error('[Discord] Message error');
     }
-  } catch {
-    console.error('[Discord] Message error');
-  }
-});
+  });
 
   client.login(token).catch(() => {
     console.error('[Discord] Login failed');
