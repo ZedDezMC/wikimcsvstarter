@@ -192,6 +192,11 @@ app.post('/api/request-mc-start', async (req, res) => {
 });
 
 // Khởi chạy Server
+process.on('unhandledRejection', (reason) => {
+  if (reason && (reason.code === 10062 || reason.code === 40060)) return;
+  console.error('[Process] Unhandled rejection');
+});
+
 app.listen(PORT, () => {
   console.log(`[Server] Listening on port ${PORT}`);
 });

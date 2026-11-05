@@ -122,8 +122,12 @@ async function editReplyWithAutoDelete(interaction, options, delayMs = 60000) {
  * Tự động làm mới Embed dữ liệu mỗi 5s và xóa tin nhắn sau 5 phút (Interaction)
  */
 async function startAutoRefreshInteractionPanel(interaction, refreshIntervalMs = 5000, totalDurationMs = 300000) {
-  const { embed, ec2State } = await buildStatusEmbed();
-  await interaction.editReply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
+  try {
+    const { embed, ec2State } = await buildStatusEmbed();
+    await interaction.editReply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
+  } catch {
+    return editReplyWithAutoDelete(interaction, { content: '[ERROR] Không thể tải dashboard.' }, 60000);
+  }
 
   const startTime = Date.now();
   const intervalId = setInterval(async () => {
@@ -139,7 +143,7 @@ async function startAutoRefreshInteractionPanel(interaction, refreshIntervalMs =
         embeds: [updatedEmbed],
         components: getDashboardActionRows(updatedState)
       });
-    } catch (err) {
+    } catch {
       clearInterval(intervalId);
     }
   }, refreshIntervalMs);
@@ -149,28 +153,32 @@ async function startAutoRefreshInteractionPanel(interaction, refreshIntervalMs =
  * Tự động làm mới Embed dữ liệu mỗi 5s và xóa tin nhắn sau 5 phút (Message Prefix)
  */
 async function startAutoRefreshMessagePanel(message, refreshIntervalMs = 5000, totalDurationMs = 300000) {
-  const { embed, ec2State } = await buildStatusEmbed();
-  const sentMsg = await message.reply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
+  try {
+    const { embed, ec2State } = await buildStatusEmbed();
+    const sentMsg = await message.reply({ embeds: [embed], components: getDashboardActionRows(ec2State) });
 
-  const startTime = Date.now();
-  const intervalId = setInterval(async () => {
-    if (Date.now() - startTime >= totalDurationMs) {
-      clearInterval(intervalId);
-      sentMsg.delete().catch(() => { });
-      message.delete().catch(() => { });
-      return;
-    }
+    const startTime = Date.now();
+    const intervalId = setInterval(async () => {
+      if (Date.now() - startTime >= totalDurationMs) {
+        clearInterval(intervalId);
+        sentMsg.delete().catch(() => { });
+        message.delete().catch(() => { });
+        return;
+      }
 
-    try {
-      const { embed: updatedEmbed, ec2State: updatedState } = await buildStatusEmbed();
-      await sentMsg.edit({
-        embeds: [updatedEmbed],
-        components: getDashboardActionRows(updatedState)
-      });
-    } catch (err) {
-      clearInterval(intervalId);
-    }
-  }, refreshIntervalMs);
+      try {
+        const { embed: updatedEmbed, ec2State: updatedState } = await buildStatusEmbed();
+        await sentMsg.edit({
+          embeds: [updatedEmbed],
+          components: getDashboardActionRows(updatedState)
+        });
+      } catch {
+        clearInterval(intervalId);
+      }
+    }, refreshIntervalMs);
+  } catch {
+    // ignore
+  }
 }
 
 /**
@@ -282,7 +290,6 @@ async function buildStatusEmbed() {
   const embed = new EmbedBuilder()
     .setColor(embedColor)
     .setTitle('Dashboard quan ly server')
-    .setDescription('')
     .addFields(
       { name: 'VPS Status', value: `\`${ec2State.toUpperCase()}\``, inline: true },
       { name: 'MC Server', value: mcOnline ? '`ONLINE`' : '`OFFLINE`', inline: true },
@@ -422,7 +429,12 @@ function initDiscordBot() {
     ]
   });
 
-  client.once('ready', async () => {
+  client.on('error', (err) => {
+    if (err.code === 10062 || err.code === 40060) return;
+    console.error('[Discord] Client error');
+  });
+
+  client.once('clientReady', async () => {
     console.log('[Discord] Ready');
     // Đăng ký Slash Commands khi Bot ready
     registerSlashCommands(client.user.id, token);
@@ -430,6 +442,7 @@ function initDiscordBot() {
 
   // 1. Xử lý Interaction (Buttons & Slash Commands)
   client.on('interactionCreate', async (interaction) => {
+    try {
     // --------------------------------------------------
     // A. XỬ LÝ SLASH COMMANDS (`/`)
     // --------------------------------------------------
@@ -463,7 +476,7 @@ function initDiscordBot() {
 
       if (commandName === 'panel') {
         await interaction.deferReply();
-        return startAutoRefreshInteractionPanel(interaction, 5000, 300000);
+        return await startAutoRefreshInteractionPanel(interaction, 5000, 300000);
       }
 
       if (commandName === 'startmc') {
@@ -766,12 +779,12 @@ function initDiscordBot() {
         const adminUser = interaction.user.tag;
 
         if (isApprove) {
-          await interaction.deferUpdate();
+          await interaction.deferUpdate().catch(() => {});
           const approvedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
             .setColor(0x2ecc71)
             .setTitle('[APPROVED]')
             .setDescription(`Đã phê duyệt yêu cầu`);
-          await interaction.editReply({ embeds: [approvedEmbed], components: [] });
+          await interaction.editReply({ embeds: [approvedEmbed], components: [] }).catch(() => {});
 
           try {
             const pufferServerId = process.env.PUFFER_SERVER_ID;
@@ -792,21 +805,26 @@ function initDiscordBot() {
             requestData.reject(err);
           }
         } else {
-          await interaction.deferUpdate();
+          await interaction.deferUpdate().catch(() => {});
           const rejectedEmbed = EmbedBuilder.from(interaction.message.embeds[0])
             .setColor(0xe74c3c)
             .setTitle('[REJECTED]')
             .setDescription(`Đã từ chối yêu cầu.`);
-          await interaction.editReply({ embeds: [rejectedEmbed], components: [] });
+          await interaction.editReply({ embeds: [rejectedEmbed], components: [] }).catch(() => {});
           requestData.resolve({ status: 'rejected', admin: adminUser });
         }
       }
     }
-  });
+  } catch (err) {
+    if (err.code === 10062 || err.code === 40060) return;
+    console.error('[Discord] Interaction error');
+  }
+});
 
   // 2. Lắng nghe tin nhắn văn bản Prefix (`!`) từ Admin & User
   client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+    try {
+      if (message.author.bot) return;
 
     const content = message.content.trim();
     const lowerContent = content.toLowerCase();
@@ -990,7 +1008,10 @@ function initDiscordBot() {
         return message.reply(`[ERROR] Lỗi khi thực thi lệnh MC: ${err.message}`);
       }
     }
-  });
+  } catch {
+    console.error('[Discord] Message error');
+  }
+});
 
   client.login(token).catch(() => {
     console.error('[Discord] Login failed');

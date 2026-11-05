@@ -264,10 +264,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const s = (sec % 60).toString().padStart(2, '0');
 
     if (btnRequestMcText) {
-      btnRequestMcText.textContent = `Đang tự nạp dữ liệu (Khóa ${m}:${s})`;
+      btnRequestMcText.textContent = `Đang chờ khởi động (${m}:${s})`;
     }
     if (requestMcDesc) {
-      requestMcDesc.textContent = `VPS vừa khởi động xong. Vui lòng chờ máy chủ tự mở (khóa nút ${m}:${s}). Nếu sau 5 phút vẫn chưa vào được, nút sẽ mở để bạn gửi thông báo cho Admin.`;
+      requestMcDesc.textContent = `Đang chờ khởi động, nếu sau 5 phút không tự khởi động thì hãy đi đến gửi yêu cầu bên dưới`;
     }
   }
 
