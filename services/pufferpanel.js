@@ -35,12 +35,12 @@ async function startPufferPanelServer(host, serverId, clientId, clientSecret) {
       }
     });
 
-    console.log(`[SUCCESS] start success [${serverId}]`);
+    console.log('[Panel] Started');
     return { success: true, data: startRes.data };
 
   } catch (error) {
-    console.error('[ERROR] error call:', error.response?.data || error.message);
-    throw new Error(`panel error: ${error.response?.data?.error || error.message}`);
+    console.error('[Panel] Start failed');
+    throw new Error('Panel error');
   }
 }
 

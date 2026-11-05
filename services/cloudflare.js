@@ -37,7 +37,7 @@ async function syncSingleRecord(zoneId, recordName, publicIp, headers) {
   const searchRes = await axios.get(searchUrl, { headers });
 
   if (!searchRes.data || !searchRes.data.success) {
-    throw new Error(`Lỗi tìm bản ghi DNS cho ${recordName}: ${JSON.stringify(searchRes.data?.errors || [])}`);
+    throw new Error(`Không tìm được DNS Record ${recordName}: ${JSON.stringify(searchRes.data?.errors || [])}`);
   }
 
   const records = searchRes.data.result || [];
@@ -45,7 +45,6 @@ async function syncSingleRecord(zoneId, recordName, publicIp, headers) {
 
   if (existingRecord) {
     if (existingRecord.content === publicIp) {
-      console.log(`[Cloudflare DDNS] Bản ghi A [${recordName}] đã khớp với IP (${publicIp}). Không cần cập nhật.`);
       return true;
     }
 
@@ -60,10 +59,10 @@ async function syncSingleRecord(zoneId, recordName, publicIp, headers) {
     }, { headers });
 
     if (updateRes.data && updateRes.data.success) {
-      console.log(`[Cloudflare DDNS] SUCCESS: Đã cập nhật bản ghi A [${recordName}] -> ${publicIp} (IP cũ: ${existingRecord.content})`);
+      console.log('[DDNS] DNS updated');
       return true;
     } else {
-      throw new Error(`Không thể cập nhật DNS [${recordName}]: ${JSON.stringify(updateRes.data?.errors || [])}`);
+      throw new Error('Update failed');
     }
   } else {
     // 3. Tạo bản ghi A mới nếu chưa tồn tại
@@ -77,10 +76,10 @@ async function syncSingleRecord(zoneId, recordName, publicIp, headers) {
     }, { headers });
 
     if (createRes.data && createRes.data.success) {
-      console.log(`[Cloudflare DDNS] SUCCESS: Đã tạo mới bản ghi A [${recordName}] -> ${publicIp}`);
+      console.log('[DDNS] DNS created');
       return true;
     } else {
-      throw new Error(`Không thể tạo mới DNS [${recordName}]: ${JSON.stringify(createRes.data?.errors || [])}`);
+      throw new Error('Create failed');
     }
   }
 }
@@ -108,7 +107,6 @@ async function syncCloudflareDNS(publicIp) {
   }
 
   isSyncing = true;
-  console.log(`[Cloudflare DDNS] Đang kiểm tra đồng bộ DNS cho ${recordNames.length} bản ghi -> IP: ${publicIp} (${recordNames.join(', ')})...`);
 
   try {
     const headers = {
@@ -129,7 +127,7 @@ async function syncCloudflareDNS(publicIp) {
         await syncSingleRecord(zoneId, recordName, publicIp, headers);
       } catch (err) {
         allSuccess = false;
-        console.error(`[Cloudflare DDNS Error] Thất bại khi đồng bộ [${recordName}]:`, err.response?.data || err.message);
+        console.error('[DDNS] Sync failed');
       }
     }
 
@@ -138,16 +136,7 @@ async function syncCloudflareDNS(publicIp) {
     }
 
   } catch (error) {
-    const errData = error.response?.data;
-    if (errData && errData.errors && errData.errors.some(e => e.code === 10000)) {
-      console.error(`[Cloudflare DDNS Error] Lỗi xác thực (Code 10000: Authentication error).`);
-      console.error(`👉 Nguyên nhân: API Token hoặc Zone ID trong .env chưa đúng / chưa đủ quyền.`);
-      console.error(`👉 Cách khắc phục:`);
-      console.error(`   - Cách 1 (API Token): Tạo Token tại Cloudflare (My Profile -> API Tokens -> Create Token -> Edit zone DNS). Đảm bảo chọn Zone Resources là "All zones" hoặc chọn đúng zone của domain.`);
-      console.error(`   - Cách 2 (Global API Key): Nếu dùng Global API Key, mở .env và điền thêm CLOUDFLARE_EMAIL=email_cua_ban và CLOUDFLARE_API_KEY=key_cua_ban.`);
-    } else {
-      console.error('[Cloudflare DDNS Error]', errData || error.message);
-    }
+    console.error('[DDNS] Error');
   } finally {
     isSyncing = false;
   }

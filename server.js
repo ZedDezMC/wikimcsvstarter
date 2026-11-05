@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const axios = require('axios');
 
 const { getInstanceStatus, startInstance } = require('./services/aws');
@@ -16,6 +17,15 @@ const MC_PORT = parseInt(process.env.MC_PORT || '25565', 10);
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Route trang chủ - tự động đồng bộ TURNSTILE_SITE_KEY từ .env vào HTML
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  const siteKey = (process.env.TURNSTILE_SITE_KEY || '').trim();
+  let html = fs.readFileSync(indexPath, 'utf8');
+  html = html.replace(/data-sitekey="[^"]*"/, `data-sitekey="${siteKey}"`);
+  res.send(html);
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Khởi tạo Discord Bot khi Server bắt đầu
@@ -28,7 +38,7 @@ async function verifyCaptcha(token, remoteIp) {
   const secretKey = process.env.TURNSTILE_SECRET_KEY;
   // Nếu chưa cấu hình Secret Key (ví dụ thử nghiệm local), cho phép bỏ qua
   if (!secretKey || secretKey.includes('XXXXXXXX')) {
-    console.warn('[WARN] no key, skip captcha.');
+    console.warn('[Turnstile] Key missing');
     return true;
   }
 
@@ -38,7 +48,9 @@ async function verifyCaptcha(token, remoteIp) {
     const formData = new URLSearchParams();
     formData.append('secret', secretKey);
     formData.append('response', token);
-    if (remoteIp) formData.append('remoteip', remoteIp);
+    if (remoteIp && !remoteIp.includes('127.0.0.1') && remoteIp !== '::1') {
+      formData.append('remoteip', remoteIp);
+    }
 
     const response = await axios.post(
       'https://challenges.cloudflare.com/turnstile/v0/siteverify',
@@ -46,9 +58,13 @@ async function verifyCaptcha(token, remoteIp) {
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
 
-    return response.data && response.data.success === true;
-  } catch (error) {
-    console.error('captcha err:', error.message);
+    if (!response.data || response.data.success !== true) {
+      console.warn('[Turnstile] Verify failed');
+      return false;
+    }
+    return true;
+  } catch {
+    console.error('[Turnstile] Error');
     return false;
   }
 }
@@ -120,12 +136,12 @@ app.post('/api/start-ec2', async (req, res) => {
     const result = await startInstance(INSTANCE_ID);
     res.json({
       success: true,
-      message: 'Đã gửi lệnh bật EC2 Instance thành công! Đang chờ server khởi động...',
+      message: 'Đã gửi lệnh bật, hãy chờ khởi động',
       result
     });
 
   } catch (error) {
-    res.status(500).json({ error: error.message || 'Không thể khởi động EC2 Instance' });
+    res.status(500).json({ error: error.message || 'Không thể khởi động' });
   }
 });
 
@@ -138,13 +154,13 @@ app.post('/api/request-mc-start', async (req, res) => {
     const { state, publicIp } = await getInstanceStatus(INSTANCE_ID);
 
     if (state !== 'running') {
-      return res.status(400).json({ error: 'EC2 Instance chưa khởi động xong. Vui lòng bật EC2 trước!' });
+      return res.status(400).json({ error: 'Chưa khởi động xong' });
     }
 
     // Kiểm tra xem server Minecraft thực sự offline không
     const isOnline = await checkMinecraftServerStatus(publicIp, MC_PORT);
     if (isOnline) {
-      return res.json({ status: 'already_online', message: 'Server Minecraft hiện đã online rồi!' });
+      return res.json({ status: 'already_online', message: 'Server đang chạy' });
     }
 
     // Gửi yêu cầu qua Discord Bot và chờ kết quả
@@ -154,28 +170,28 @@ app.post('/api/request-mc-start', async (req, res) => {
       return res.json({
         success: true,
         status: 'approved',
-        message: `Admin (${result.admin}) đã CHẤP NHẬN! Đã gửi lệnh bật Minecraft Server qua AWS SSM.`
+        message: `Admin đã chấp nhận, sẵn sàng bật server`
       });
     } else if (result.status === 'rejected') {
       return res.status(403).json({
         success: false,
         status: 'rejected',
-        error: `Admin (${result.admin}) đã TỪ CHỐI yêu cầu bật Minecraft Server.`
+        error: `Admin đã từ chối, sẽ không bật server`
       });
     } else {
       return res.status(408).json({
         success: false,
         status: 'timeout',
-        error: 'Yêu cầu đã HẾT HẠN sau 10 phút vì không nhận được phản hồi từ Admin.'
+        error: 'Yêu cầu đã hết hạn, hãy gửi lại yêu cầu'
       });
     }
 
   } catch (error) {
-    res.status(500).json({ error: error.message || 'Lỗi khi gửi yêu cầu đến Discord' });
+    res.status(500).json({ error: error.message || 'Lỗi khi gửi yêu cầu' });
   }
 });
 
 // Khởi chạy Server
 app.listen(PORT, () => {
-  console.log(`[INFO] Server dang chay tai: http://localhost:${PORT}`);
+  console.log(`[Server] Listening on port ${PORT}`);
 });

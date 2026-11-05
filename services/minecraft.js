@@ -84,7 +84,7 @@ function sendDirectRconCommand(host, port, password, command, timeoutMs = 5000) 
             isResolved = true;
             clearTimeout(timer);
             socket.destroy();
-            reject(new Error('Mật khẩu RCON không chính xác'));
+            reject(new Error('wrong rcon pass'));
           }
           return;
         }
@@ -154,7 +154,7 @@ password = "${safePassword}"
 cmd = "${safeCommand}"
 
 if not password:
-    print("ERR_NO_PASSWORD: Chưa cấu hình RCON_PASSWORD trong file .env")
+    print("ERR_NO_PASSWORD")
     sys.exit(1)
 
 try:
@@ -171,7 +171,7 @@ try:
     r_id, r_type = struct.unpack("<ii", resp[:8])
 
     if r_id == -1:
-        print("ERR_AUTH_FAILED: Mật khẩu RCON không chính xác")
+        print("ERR_AUTH_FAILED: wrong rcon pass")
         s.close()
         sys.exit(1)
 
@@ -182,9 +182,9 @@ try:
     resp = s.recv(resp_len)
     output = resp[8:-2].decode("utf-8", errors="ignore")
     s.close()
-    print(output.strip() if output.strip() else "(Lệnh đã được thực thi thành công, không có phản hồi văn bản)")
+    print(output.strip() if output.strip() else "(ran cmd, no respond)")
 except Exception as e:
-    print(f"ERR_CONNECT_FAILED: Không thể kết nối tới RCON ({e})")
+    print(f"ERR_CONNECT_FAILED: ({e})")
     sys.exit(1)
 '`;
 }
@@ -197,13 +197,13 @@ async function sendMinecraftRconCommand(instanceId, publicIp, command) {
   const rconPassword = (process.env.RCON_PASSWORD || process.env.MC_RCON_PASSWORD || '').trim();
 
   if (!rconPassword) {
-    throw new Error('Chưa cấu hình RCON_PASSWORD trong file .env của hệ thống. Vui lòng thêm RCON_PASSWORD vào .env và bật enable-rcon=true trong server.properties của Minecraft Server.');
+    throw new Error('no rcon env pass');
   }
 
   // Loại bỏ dấu / ở đầu lệnh nếu có (VD: /list -> list)
   const cleanCmd = command.trim().replace(/^\//, '');
   if (!cleanCmd) {
-    throw new Error('Lệnh Minecraft không được để trống.');
+    throw new Error('enter cmd please');
   }
 
   // 1. Thử kết nối Direct RCON nếu có Public IP
@@ -211,8 +211,8 @@ async function sendMinecraftRconCommand(instanceId, publicIp, command) {
     try {
       const directResult = await sendDirectRconCommand(publicIp, rconPort, rconPassword, cleanCmd, 4000);
       return directResult;
-    } catch (directErr) {
-      console.log(`[RCON Direct Warning] Direct connection to ${publicIp}:${rconPort} failed (${directErr.message}), falling back to AWS SSM...`);
+    } catch {
+      // Fallback to SSM
     }
   }
 
@@ -227,13 +227,13 @@ async function sendMinecraftRconCommand(instanceId, publicIp, command) {
 
   const output = ssmResult.stdout;
   if (output.startsWith('ERR_AUTH_FAILED')) {
-    throw new Error('Mật khẩu RCON không đúng. Vui lòng kiểm tra lại RCON_PASSWORD trong .env và server.properties.');
+    throw new Error('wrong rcon pass');
   }
   if (output.startsWith('ERR_NO_PASSWORD')) {
-    throw new Error('Chưa cấu hình RCON_PASSWORD trong file .env.');
+    throw new Error('no rcon pass in env');
   }
   if (output.startsWith('ERR_CONNECT_FAILED')) {
-    throw new Error('Không thể kết nối RCON trên VPS. Hãy đảm bảo Minecraft Server đã bật RCON (enable-rcon=true trong server.properties).');
+    throw new Error('cant connect rcon');
   }
 
   return output;

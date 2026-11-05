@@ -24,18 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const progressBarEl = document.getElementById('progress-bar');
   const toastEl = document.getElementById('toast-message');
 
-  // Background & Blur Settings Elements
-  const bgCustomLayer = document.getElementById('bg-custom-layer');
-  const bgOverlayLayer = document.getElementById('bg-overlay-layer');
-  const btnOpenBlurSettings = document.getElementById('btn-open-blur-settings');
-  const btnCloseBlur = document.getElementById('btn-close-blur');
-  const blurModal = document.getElementById('blur-modal');
-  const sliderBlur = document.getElementById('slider-blur');
-  const blurValText = document.getElementById('blur-val-text');
-  const sliderOverlay = document.getElementById('slider-overlay');
-  const overlayValText = document.getElementById('overlay-val-text');
-  const btnResetBlur = document.getElementById('btn-reset-blur');
-
   // State Variables
   let currentCaptchaToken = null;
   let pollInterval = null;
@@ -60,90 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // SVG Icons for Request Button
   const LOCK_SVG = `<rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>`;
   const CHAT_SVG = `<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>`;
-
-  // ----------------------------------------------------
-  // BACKGROUND BLUR & OVERLAY CONTROL LOGIC
-  // ----------------------------------------------------
-  initBlurSettings();
-
-  function initBlurSettings() {
-    const savedBlur = localStorage.getItem('user_bg_blur') || '6';
-    const savedOverlay = localStorage.getItem('user_bg_overlay') || '55';
-
-    applyBlur(savedBlur);
-    applyOverlay(savedOverlay);
-
-    // Open Modal
-    btnOpenBlurSettings.addEventListener('click', () => {
-      blurModal.classList.remove('hidden');
-    });
-
-    // Close Modal
-    btnCloseBlur.addEventListener('click', () => {
-      blurModal.classList.add('hidden');
-    });
-
-    blurModal.addEventListener('click', (e) => {
-      if (e.target === blurModal) {
-        blurModal.classList.add('hidden');
-      }
-    });
-
-    // Close on Escape key
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !blurModal.classList.contains('hidden')) {
-        blurModal.classList.add('hidden');
-      }
-    });
-
-    // Blur Slider Change
-    sliderBlur.addEventListener('input', (e) => {
-      const val = e.target.value;
-      applyBlur(val);
-      localStorage.setItem('user_bg_blur', val);
-    });
-
-    // Overlay Slider Change
-    sliderOverlay.addEventListener('input', (e) => {
-      const val = e.target.value;
-      applyOverlay(val);
-      localStorage.setItem('user_bg_overlay', val);
-    });
-
-    // Reset Button
-    btnResetBlur.addEventListener('click', () => {
-      applyBlur('6');
-      applyOverlay('55');
-      localStorage.removeItem('user_bg_blur');
-      localStorage.removeItem('user_bg_overlay');
-      showToast('Đã khôi phục cài đặt hình nền mặc định!');
-    });
-  }
-
-  function applyBlur(pxVal) {
-    if (bgCustomLayer) {
-      bgCustomLayer.style.filter = `blur(${pxVal}px)`;
-    }
-    if (blurValText) {
-      blurValText.textContent = `${pxVal}px`;
-    }
-    if (sliderBlur) {
-      sliderBlur.value = pxVal;
-    }
-  }
-
-  function applyOverlay(opacityPercent) {
-    const opacityDec = parseInt(opacityPercent, 10) / 100;
-    if (bgOverlayLayer) {
-      bgOverlayLayer.style.background = `rgba(11, 17, 32, ${opacityDec})`;
-    }
-    if (overlayValText) {
-      overlayValText.textContent = `${opacityPercent}%`;
-    }
-    if (sliderOverlay) {
-      sliderOverlay.value = opacityPercent;
-    }
-  }
 
   // ----------------------------------------------------
   // SYSTEM STATUS & ACTIONS LOGIC
@@ -301,8 +205,8 @@ document.addEventListener('DOMContentLoaded', () => {
           checkAndApply5MinLock();
         }
       }
-    } catch (err) {
-      if (!isBackground) console.error('Error fetching status:', err);
+    } catch {
+      // ignore
     }
   }
 
@@ -415,30 +319,43 @@ document.addEventListener('DOMContentLoaded', () => {
       sec.classList.add('hidden');
     });
     activeSection.classList.remove('hidden');
+    if (activeSection !== sectionStarting && progressBarEl) {
+      progressBarEl.classList.remove('indeterminate');
+    }
   }
 
   /**
    * Cloudflare Turnstile Captcha Handler
    */
-  function initTurnstile(siteKey) {
-    if (!siteKey || siteKey.includes('XXXXX')) {
+  function initTurnstile(siteKey = turnstileSiteKey) {
+    const key = siteKey || captchaWrapper?.dataset?.sitekey || '';
+    if (!key || key.includes('XXXXX')) {
       btnStartEc2.disabled = false;
       return;
     }
 
-    if (window.turnstile && captchaWrapper.children.length === 0) {
-      turnstileWidgetId = window.turnstile.render('#captcha-container', {
-        sitekey: siteKey,
-        theme: 'dark',
-        callback: (token) => {
-          currentCaptchaToken = token;
-          btnStartEc2.disabled = false;
-        },
-        'expired-callback': () => {
-          currentCaptchaToken = null;
-          btnStartEc2.disabled = true;
-        }
-      });
+    if (!window.turnstile) {
+      setTimeout(() => initTurnstile(key), 300);
+      return;
+    }
+
+    if (captchaWrapper && captchaWrapper.children.length === 0) {
+      try {
+        turnstileWidgetId = window.turnstile.render('#captcha-container', {
+          sitekey: key,
+          theme: 'dark',
+          callback: (token) => {
+            currentCaptchaToken = token;
+            btnStartEc2.disabled = false;
+          },
+          'expired-callback': () => {
+            currentCaptchaToken = null;
+            btnStartEc2.disabled = true;
+          }
+        });
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -451,19 +368,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Progress Bar Animation Simulation
+   * Progress Bar GPU Animation
    */
   function animateProgressBar() {
-    let progress = 10;
-    progressBarEl.style.width = '10%';
-    const interval = setInterval(() => {
-      if (progress < 90) {
-        progress += Math.floor(Math.random() * 8) + 2;
-        progressBarEl.style.width = `${progress}%`;
-      } else {
-        clearInterval(interval);
-      }
-    }, 1500);
+    if (!progressBarEl) return;
+    progressBarEl.classList.remove('indeterminate');
+    void progressBarEl.offsetWidth;
+    progressBarEl.classList.add('indeterminate');
   }
 
   /**

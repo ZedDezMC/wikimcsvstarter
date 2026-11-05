@@ -37,7 +37,7 @@ async function getInstanceStatus(instanceId) {
 
     // Tự động đồng bộ IP mới lên Cloudflare DDNS nếu VPS đang running
     if (state === 'running' && publicIp) {
-      syncCloudflareDNS(publicIp).catch(err => console.error('[Cloudflare Sync Error]', err.message));
+      syncCloudflareDNS(publicIp).catch(() => {});
     }
 
     return {
@@ -45,7 +45,7 @@ async function getInstanceStatus(instanceId) {
       publicIp
     };
   } catch (error) {
-    console.error('Loi khi check status:', error);
+    console.error('[EC2] Check status failed');
     throw error;
   }
 }
@@ -65,7 +65,7 @@ async function startInstance(instanceId) {
       currentState: startingInstance ? startingInstance.CurrentState.Name : 'pending'
     };
   } catch (error) {
-    console.error('Loi khi start:', error);
+    console.error('[EC2] Start failed');
     throw error;
   }
 }
@@ -81,11 +81,11 @@ async function stopInstance(instanceId) {
 
     return {
       success: true,
-      previousState: stoppingInstance ? stoppingInstance.PreviousState.Name : 'unknown',
+      previousState: startingInstance ? startingInstance.PreviousState.Name : 'unknown',
       currentState: stoppingInstance ? stoppingInstance.CurrentState.Name : 'stopping'
     };
   } catch (error) {
-    console.error('Loi khi stop:', error);
+    console.error('[EC2] Stop failed');
     throw error;
   }
 }
@@ -101,7 +101,7 @@ async function rebootInstance(instanceId) {
       success: true
     };
   } catch (error) {
-    console.error('Loi khi reboot EC2 Instance:', error);
+    console.error('[EC2] Reboot failed');
     throw error;
   }
 }
@@ -120,13 +120,12 @@ async function runSSMStartMinecraftCommand(instanceId, shellCommand) {
     });
 
     const response = await ssmClient.send(command);
-    console.log(`sent cmd success: ${response.Command.CommandId}`);
     return {
       success: true,
       commandId: response.Command.CommandId
     };
   } catch (error) {
-    console.error('cant send req:', error);
+    console.error('[SSM] Send failed');
     if (error.name === 'InvalidInstanceId' || (error.message && error.message.includes('not in a valid state'))) {
       throw new Error(`env not set correctly: (${instanceId})`);
     }
@@ -172,9 +171,7 @@ async function runSSMCommandWithOutput(instanceId, shellCommand, timeoutMs = 150
           };
         }
       } catch (err) {
-        if (!err.name || !err.name.includes('InvocationDoesNotExist')) {
-          console.warn('[SSM Invocation Warn]', err.message);
-        }
+        // Suppress retry warnings
       }
     }
 
@@ -182,10 +179,10 @@ async function runSSMCommandWithOutput(instanceId, shellCommand, timeoutMs = 150
       success: false,
       status: 'TimedOut',
       stdout: '',
-      stderr: 'Lệnh chạy quá thời gian (Timeout)'
+      stderr: 'Timeout'
     };
   } catch (error) {
-    console.error('Lỗi khi chạy:', error);
+    console.error('[SSM] Run failed');
     throw error;
   }
 }
